@@ -1,0 +1,75 @@
+https://docs.google.com/document/d/1pLR6y47FebVBp9ex2BVtA4SOy_042sJb6fGU8q4wQn4/edit?usp=sharing
+Homework-3: Outline of Project
+Group-3 Web Development Course: Group Project Assignment Outline
+
+Group Members and Name: Group name - CareerFinders 
+Weilan Liang
+Dereje Teshager
+Aden Abdulahi
+
+Project Topic Options:
+The chosen possible project topic and its justification:
+
+
+Career tracker(Career tracker & resume builder): 
+A Career Tracker website will be an essential tool for students as they navigate their academic journey and prepare for their future careers. By offering tailored features, it helps students plan their career paths, and track professional milestones.
+The implementation involves several technical components, from backend development to frontend design, database management, and external API integrations.
+This web app will be easy for new graduates, and students to access and be familiar with contents and opportunities gathered in real time, and will be cost free. To access, customers require creating an account. After the customers navigate the career opportunities they will be able to develop their own professional resume accordingly.
+
+
+API:
+Career event from eventbrite:
+Intro to APIs — Documentation | Eventbrite Platform
+API Reference | Eventbrite Platform
+Adzuna API:
+Overview
+https://developer.adzuna.com/admin/access_details
+	JSON Resume API:
+jsonresume.org
+
+
+Project timeline, including key milestones.
+Week_5:Decide Project Topic, Submit justification, initial-host-website(EC2,  docker, GitHub, web style/front end)
+Week_6: Web application Structure: Login and Registration page
+Week_7: Database (SQLAlchemy), External API integration
+Week_8:PPT creation / presentation
+Week_9:Debug, Deployment
+Week_10: Final Presentation
+		
+Technologies chosen and reasons for their selection.
+The project web developers agreed to use the below technologies
+Amazon EC2: For its accessibility and cost effectiveness
+Code Editors like cursor and VS code: Efficiency in code development
+GitHub: Documentation and file sharing to group members.
+Docker Container: To containerize our project file and make it ready for deployment.
+Ubuntu: free, widely supported, developer-friendly, and well-suited for Docker-based deployments.
+
+
+Project Approval Meeting:
+Two group members met professor Ling-Hong Hung, and discussed the project on Wednesday April 30, 2025. The team members presented project team progress and discussed optional project titles at hand. The professor advised us to prepare an external API for integration, and select one of the presented project titles.
+
+
+Roles and responsibilities of each member.
+      Table 1: Group-3 Responsibility Sharing Matrix
+Group-3
+                Members Role
+Remark                        Member-Name
+Roles
+Coordinator: Weilan Liang
+Supervisor: Dereje Teshager
+Project Submitter: Aden Abdulahi
+
+
+
+Goal: This bylaw facilitates practical cooperation and responsibility sharing between the three members of Group-3.
+Coordinator Role: The coordinator will send reminder emails, organize Zoom meetings, and take the lead to ensure project work is on the right track and progressive. Does one third of the project and ensures the project tasks and files are properly compiled. Support other members if it is necessary to help.
+Supervisor Role: The supervisor will oversee the progressiveness of the project, and send the remainder, if necessary, with specifics on areas that need attention, and effective focus. Does one third of the project and ensures the project tasks and files are properly compiled. Support other members if it is necessary to help.
+Project Submitter Role: The project submitter will ensure that all work is organized and documented, through collecting the work of others, and will ensure that the work submitted is not changed or altered unless notified who does that work and has agreed. Does one-third of the project and ensures the project tasks and files are properly compiled. Finally, submit the project assignment as per the instructions provided. Support other members if it is necessary to help.
+General Role: Each Team-One member will do a sufficient part of the project or group assignment and must make sure that she/he understands and that the problem is solved clearly. Each member will ensure that they respect the views, ideas, methods of work, culture, and preferences of other team members. Each member will ensure that he/she is dependable and are available at the group meetings as best as possible, or notify the team in advance and respond to communications accordingly.
+ 
+Date: April 29, 2025
+
+
+
+
+
