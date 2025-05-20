@@ -1,0 +1,35 @@
+{% extends "layout.html" %}
+{% block content %}
+  <div class="container my-4">
+    <h1>Your Saved Jobs</h1>
+    {% if not saved_jobs %}
+      <p class="text-muted">You haven’t saved any jobs yet.</p>
+    {% else %}
+      <ul class="list-group">
+    {% for sj in saved_jobs %}
+      {% set job = sj.job_data %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+          <strong>{{ job.title or job.PositionTitle }}</strong><br>
+          <small class="text-muted">
+            {{ job.company.display_name or job.OrganizationName }}
+            — {{ job.location.display_name or job.PositionLocationDisplay }}
+          </small>
+        </div>
+        <div>
+          {% if sj.api_used == 'adzuna' %}
+            <a href="{{ job.redirect_url }}" class="btn btn-sm btn-primary">Apply</a>
+          {% else %}
+            <a href="{{ job.ApplyURI }}" class="btn btn-sm btn-primary">Apply</a>
+          {% endif %}
+          <form method="POST" action="{{ url_for('unsave_job') }}" class="d-inline">
+            <input type="hidden" name="saved_job_id" value="{{ sj.id }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+          </form>
+        </div>
+      </li>
+    {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endblock %}

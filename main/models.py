@@ -30,3 +30,16 @@ class User(db.Model, UserMixin):
         return User.query.get(user_id)
     def __repr__(self):
         return f"User('{self.username}', '{self.email}')"
+
+class SavedJob(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    job_id     = db.Column(db.String, nullable=False)      # unique identifier from Adzuna or USAJobs
+    api_used   = db.Column(db.String(20), nullable=False)  # To store 'adzuna' or 'usajobs'
+    job_data   = db.Column(db.JSON, nullable=False)        # store title/company/location/url, etc.
+    saved_at   = db.Column(db.DateTime, server_default=db.func.now())
+
+    user = db.relationship('User', backref='saved_jobs')
+
+    def __repr__(self):
+        return f"SavedJob('{self.job_id}', api_used='{self.api_used}', user='{self.user.username}', saved_at='{self.saved_at}')"

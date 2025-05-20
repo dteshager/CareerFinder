@@ -1,5 +1,304 @@
 {% extends 'layout.html' %}
 {% block content %}
+<div class="container">
+  <h1 class="mb-4">CareerFinder</h1>
 
-    <h1> This is the home page</h1>
-{% endblock content %}
+    {# Compute saved_ids once #}
+    {% if current_user.is_authenticated %}
+      {% set saved_ids = current_user.saved_jobs | map(attribute='job_id') | list %}
+    {% else %}
+      {% set saved_ids = [] %}
+    {% endif %}
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('home') }}">
+        <div class="row">
+          <div class="col-md-4 mb-3">
+            <label for="query" class="form-label">Job Keywords</label>
+            <input type="text" class="form-control" id="query" name="query"
+                   placeholder="Software Engineer, Data Scientist..."
+                   value="{{ keyword }}">
+          </div>
+          <div class="col-md-4 mb-3">
+            <label for="location" class="form-label">Location</label>
+            <input type="text" class="form-control" id="location" name="location"
+                   placeholder="Seattle, New York..."
+                   value="{{ location }}">
+          </div>
+          <div class="col-md-4 mb-3">
+            <label for="job_type" class="form-label">Position Type</label>
+            <select class="form-select" id="job_type" name="job_type">
+              <option value=""      {% if not job_type %}selected{% endif %}>Any</option>
+              <option value="full_time"  {% if job_type=='full_time' %}selected{% endif %}>Full Time</option>
+              <option value="part_time"  {% if job_type=='part_time' %}selected{% endif %}>Part Time</option>
+              <option value="contract"   {% if job_type=='contract' %}selected{% endif %}>Contract</option>
+              <option value="internship" {% if job_type=='internship' %}selected{% endif %}>Internship</option>
+              <option value="remote"     {% if job_type=='remote' %}selected{% endif %}>Remote</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-2 offset-md-10 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary w-100">Search</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {# Error Message #}
+  {% if error_message %}
+    <div class="alert alert-danger">{{ error_message }}</div>
+  {% endif %}
+
+  {# Job Listings #}
+  {% if jobs %}
+    <h2 class="mb-3">Job Listings ({{ total_jobs }} found)</h2>
+    {% if total_pages > 1 %}
+      <p class="text-muted">Page {{ page }} of {{ total_pages }}</p>
+    {% endif %}
+
+    <div class="accordion" id="jobAccordion">
+      {% for job in jobs %}
+        {% if api_used == 'usajobs' and job.MatchedObjectDescriptor %}
+          {% set pos = job.MatchedObjectDescriptor %}
+          <div class="card mb-3">
+            <div class="card-header bg-light d-flex justify-content-between">
+              <div>
+                <h5 class="mb-0">{{ pos.PositionTitle }}</h5>
+                <small class="text-muted">
+                  {{ pos.OrganizationName }} | {{ pos.PositionLocationDisplay }}
+                </small>
+              </div>
+              <div>
+                {% if pos.ApplyURI %}
+                  <a href="{{ pos.ApplyURI }}"
+                     class="btn btn-primary btn-sm me-2">
+                    Apply
+                  </a>
+                {% endif %}
+                {% if pos.PositionURI %}
+                  <a href="{{ pos.PositionURI }}"
+                     class="btn btn-outline-secondary btn-sm me-2" target="_blank">
+                    Details
+                  </a>
+                {% endif %}
+
+                {# Heart Button #}
+                <form method="POST" action="{{ url_for('save_job') }}" class="d-inline save-job-form">
+                  <input type="hidden" name="job_id"   value="{{ pos.PositionID }}">
+                  <input type="hidden" name="api_used" value="usajobs">
+                  <input type="hidden" name="job_data" value="{{ pos|tojson }}">
+                  <button type="submit" class="btn btn-link p-0 save-heart-btn">
+                    {% if pos.PositionID in saved_ids %}
+                      <i class="bi bi-heart-fill text-primary"></i>
+                    {% else %}
+                      <i class="bi bi-heart"></i>
+                    {% endif %}
+                  </button>
+                  <span class="save-status-message ms-2"></span>
+                </form>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <div class="accordion" id="usajobsDesc-{{ pos.PositionID }}">
+                {% if pos.JobSummary %}
+                  <div class="card">
+                    <div class="card-header" id="headingJS-{{ pos.PositionID }}">
+                      <button class="btn btn-link" data-toggle="collapse"
+                              data-target="#collapseJS-{{ pos.PositionID }}"
+                              aria-expanded="true">
+                        Summary
+                      </button>
+                    </div>
+                    <div id="collapseJS-{{ pos.PositionID }}" class="collapse show"
+                         data-parent="#usajobsDesc-{{ pos.PositionID }}">
+                      <div class="card-body">
+                        {{ pos.JobSummary }}
+                      </div>
+                    </div>
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+        {% elif api_used == 'adzuna' %}
+          <div class="card mb-3">
+            <div class="card-header bg-light d-flex justify-content-between">
+              <div>
+                <h5 class="mb-0">{{ job.title }}</h5>
+                <small class="text-muted">
+                  {{ job.company.display_name }} | {{ job.location.display_name }}
+                </small>
+              </div>
+              <div>
+                <a href="{{ job.redirect_url }}"
+                   class="btn btn-primary btn-sm me-2">
+                  Apply
+                </a>
+
+                {# Heart Button #}
+                <form method="POST" action="{{ url_for('save_job') }}" class="d-inline save-job-form">
+                  <input type="hidden" name="job_id"   value="{{ job.id }}">
+                  <input type="hidden" name="api_used" value="{{ api_used }}">
+                  {% if api_used == 'adzuna' %}
+                      <input type="hidden" name="job_data" value='{{ "{{\"id\": \"{}\", \"title\": \"{}\", \"company\": {{\"display_name\": \"{}\"}}, \"location\": {{\"display_name\": \"{}\"}}, \"redirect_url\": \"{}\"}}".format(job.id|string|e, job.title|string|e, job.company.display_name|string|e, job.location.display_name|string|e, job.redirect_url|string|e) }}'>
+                  {% else %}
+                      <input type="hidden" name="job_data" value="{{ job|tojson }}">
+                  {% endif %}
+                  <button type="submit" class="btn btn-link p-0 save-heart-btn">
+                    {% if job.id in saved_ids %}
+                      <i class="bi bi-heart-fill text-primary"></i>
+                    {% else %}
+                      <i class="bi bi-heart"></i>
+                    {% endif %}
+                  </button>
+                  <span class="save-status-message ms-2"></span>
+                </form>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <div class="accordion" id="adzunaDesc-{{ loop.index }}">
+                <div class="card">
+                  <div class="card-header" id="headingAD-{{ loop.index }}">
+                    <button class="btn btn-link" data-toggle="collapse"
+                            data-target="#collapseAD-{{ loop.index }}"
+                            aria-expanded="true">
+                      Description
+                    </button>
+                  </div>
+                  <div id="collapseAD-{{ loop.index }}" class="collapse show"
+                       data-parent="#adzunaDesc-{{ loop.index }}">
+                    <div class="card-body">
+                      {{ job.description | safe }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {# Pagination Controls #}
+    {% if total_pages > 1 %}
+      <nav aria-label="Pages">
+        <ul class="pagination justify-content-center">
+          <li class="page-item {{ 'disabled' if page==1 else '' }}">
+            <a class="page-link"
+               href="{{ url_for('home', page=page-1, keyword=keyword, location=location, job_type=job_type) }}">
+              &laquo;
+            </a>
+          </li>
+          {% set start = [1, page-2]|max %}
+          {% set end   = [start+4, total_pages]|min %}
+          {% if end-start<4 %}
+            {% set start = [total_pages-4,1]|max %}
+          {% endif %}
+          {% for p in range(start, end+1) %}
+            <li class="page-item {{ 'active' if p==page else '' }}">
+              <a class="page-link"
+                 href="{{ url_for('home', page=p, keyword=keyword,
+                                  location=location, job_type=job_type) }}">
+                {{ p }}
+              </a>
+            </li>
+          {% endfor %}
+          <li class="page-item {{ 'disabled' if page==total_pages else '' }}">
+            <a class="page-link"
+               href="{{ url_for('home', page=page+1, keyword=keyword,
+                                location=location, job_type=job_type) }}">
+              &raquo;
+            </a>
+          </li>
+        </ul>
+      </nav>
+    {% endif %}
+
+  {% elif request.method=='POST' %}
+    <div class="alert alert-info">
+      No jobs found. Try different keywords or location.
+    </div>
+  {% else %}
+    <div class="alert alert-info">
+      <h4>Welcome!</h4>
+      <p>Enter search terms above to get started.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const isAuthenticated = {{ current_user.is_authenticated|tojson }};
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const saveJobForms = document.querySelectorAll('.save-job-form');
+
+    saveJobForms.forEach(form => {
+      form.addEventListener('submit', function (event) {
+        if (!isAuthenticated) {
+          // If user is not authenticated, let the form submit traditionally.
+          // This will allow Flask's @custom_login_required_for_save to redirect to login.
+          return; // Do not preventDefault, do not fetch.
+        }
+
+        event.preventDefault(); // Prevent traditional form submission if authenticated
+        
+        const formData = new FormData(form);
+        const heartButton = form.querySelector('.save-heart-btn');
+        const icon = heartButton.querySelector('i');
+        const statusMessageSpan = form.querySelector('.save-status-message');
+
+        fetch(form.action, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest' // Identify as AJAX
+          }
+        })
+        .then(response => {
+          if (!response.ok) {
+            return response.json().then(errData => {
+                throw new Error(errData.message || `Server error: ${response.status}`);
+            }).catch(() => {
+                throw new Error(`Server error: ${response.status} - Could not parse error response.`);
+            });
+          }
+          return response.json();
+        })
+        .then(data => {
+          statusMessageSpan.textContent = data.message || 'Action complete.';
+          statusMessageSpan.className = 'save-status-message ms-2'; // Reset classes
+
+          if (data.status === 'success' || (data.status === 'info' && data.saved)) {
+            icon.classList.remove('bi-heart');
+            icon.classList.add('bi-heart-fill', 'text-primary');
+            statusMessageSpan.classList.add('text-success');
+          } else if (data.status === 'error') {
+            statusMessageSpan.classList.add('text-danger');
+          } else {
+             statusMessageSpan.classList.add('text-muted');
+          }
+          setTimeout(() => {
+            statusMessageSpan.textContent = '';
+          }, 3000);
+        })
+        .catch(error => {
+          console.error('Save job error:', error);
+          statusMessageSpan.textContent = error.message || 'Request failed.';
+          statusMessageSpan.className = 'save-status-message ms-2 text-danger';
+          setTimeout(() => {
+            statusMessageSpan.textContent = '';
+          }, 3000);
+        });
+      });
+    });
+  });
+</script>
+{% endblock %}
