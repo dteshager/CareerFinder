@@ -179,6 +179,7 @@ def logout():
     # Clear any pending actions if user logs out
     session.pop('pending_save_job', None)
     session.modified = True
+
     return redirect(url_for('home'))
 
 @app.route('/account', methods=['GET', 'POST'])
@@ -317,7 +318,7 @@ def unsave_job():
     
     db.session.delete(sj)
     db.session.commit()
-    flash('Job removed from your saved list!', 'warning')
+    flash('Job removed from your saved list!', 'info')
     return redirect(request.referrer or url_for('saved_jobs'))
 
 def send_reset_email(user):
