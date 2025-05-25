@@ -1,0 +1,31 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<div class="container d-flex flex-column align-items-center justify-content-center py-5" style="min-height: 50vh; max-width: 600px;">
+
+    <h1 class="mb-4 text-center text-primary">Resume Tools</h1>
+
+    <!-- Upload Resume Card -->
+    <div class="card shadow-sm mb-4 w-100">
+        <div class="card-body text-center">
+            <h5 class="card-title">Upload Your Resume</h5>
+            <p class="card-text">Get personalized suggestions and improvements powered by AI.</p>
+            <form method="post" enctype="multipart/form-data" action="{{ url_for('resume') }}">
+                <input type="file" name="file" accept=".pdf,.docx" required class="form-control mb-3" />
+                <button type="submit" class="btn btn-outline-primary">Upload Resume</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Build Resume Card -->
+    <div class="card shadow-sm w-100">
+        <div class="card-body text-center">
+            <h5 class="card-title">Create a New Resume</h5>
+            <p class="card-text">Start from scratch using our guided resume builder with customizable templates.</p>
+            <a href="{{ url_for('resume_builder') }}" class="btn btn-outline-success">Build Resume</a>
+        </div>
+    </div>
+
+</div>
+
+{% endblock content %}

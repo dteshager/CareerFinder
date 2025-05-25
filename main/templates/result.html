@@ -1,0 +1,36 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="container mt-4">
+  <h2>AI Suggestions for Your Resume</h2>
+
+  {% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('result') }}">
+    <textarea name="suggestions" class="form-control" rows="15" {% if accepted %}readonly{% endif %}>{{ suggestions }}</textarea>
+
+    <div class="mt-3 d-flex gap-3">
+      {% if not accepted %}
+      <button type="button" class="btn btn-outline-primary" onclick="downloadSuggestions()">Download Suggestions</button>
+      <button type="submit" class="btn btn-primary">Accept Suggestions</button>
+      {% else %}
+      <div class="alert alert-success">Suggestions accepted!</div>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+<script>
+function downloadSuggestions() {
+  const text = document.querySelector('textarea[name="suggestions"]').value;
+  const blob = new Blob([text], {type: 'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'resume_suggestions.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

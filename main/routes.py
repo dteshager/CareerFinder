@@ -1,13 +1,53 @@
+import os
 import json
-from flask import render_template, url_for, flash, redirect, request, abort, session, jsonify
-from main import app, db, bcrypt, mail
-from main.models import User, SavedJob
+from flask import render_template, url_for, flash, redirect, request, abort, session, jsonify, send_file
+from wtforms.validators import email
+
+from main import app, db, bcrypt, mail, google_bp, google, github_bp, github
+from main.models import User, SavedJob, Resume
 from main.forms import RegistrationForm, LoginForm, UpdateAccountForm, RequestRestForm, ResetPasswordForm
 from flask_login import login_user, current_user, logout_user, login_required
 from flask_mail import Message
 import requests
 from functools import wraps
 import ast
+from datetime import datetime
+import docx
+
+
+import tempfile
+import pdfkit
+from jinja2 import Template
+import json
+import pdfplumber
+from main.utils.resume_parser import extract_text, get_ai_suggestions
+from main.utils.resume_formatter import format_resume_data
+from main.utils.template_loader import load_template
+from werkzeug.utils import secure_filename
+
+
+
+import cohere
+from dotenv import load_dotenv
+# Load environment variables
+load_dotenv()
+
+ADZUNA_ID=os.getenv('ADZUNA_APP_ID')
+ADZUNA_KEY=os.getenv('ADZUNA_APP_KEY')
+ADZUNA_COUNTRY=os.getenv("ADZUNA_COUNTRY")
+
+
+
+# Resume Parser API configuration
+RESUME_PARSER_API_KEY = os.getenv('RESUME_PARSER_API_KEY')
+RESUME_PARSER_URL = "https://resume-parser-api.p.rapidapi.com/api/v1/parser/resume"
+
+
+
+@app.context_processor
+def inject_year():
+    return {'current_year': datetime.now().year}
+
 
 # Custom decorator
 def custom_login_required_for_save(f):
@@ -27,43 +67,31 @@ def custom_login_required_for_save(f):
                     if job_data_from_form:
                         try:
                             # Try to parse it to extract key fields safely
-                            temp_job_data = json.loads(job_data_from_form) 
+                            temp_job_data = json.loads(job_data_from_form)
                         except json.JSONDecodeError:
                              try:
                                 # Fallback to ast.literal_eval if direct JSON fails
                                 temp_job_data = ast.literal_eval(job_data_from_form)
                              except:
                                 temp_job_data = None # Could not parse
-                        
-                        if isinstance(temp_job_data, dict):
-                            pending_data['title'] = temp_job_data.get('title')
-                            pending_data['company_display_name'] = temp_job_data.get('company', {}).get('display_name')
-                            pending_data['location_display_name'] = temp_job_data.get('location', {}).get('display_name')
-                            pending_data['redirect_url'] = temp_job_data.get('redirect_url')
-                            flash(f'DEBUG custom_login (adzuna): Storing minimal data: {pending_data}', 'debug')
-                        else:
-                            flash(f'DEBUG custom_login (adzuna): Could not parse job_data_from_form to extract minimal fields. Storing only ID/API. Data: {job_data_from_form[:100]}', 'warning')
+
                     else:
                         flash('DEBUG custom_login (adzuna): job_data_from_form is None/empty. Storing only ID/API.', 'warning')
                 elif api_used == 'usajobs':
                     # For USAJobs, store the full job_data as it's generally smaller/structured
                     pending_data['job_data'] = job_data_from_form
                     flash(f'DEBUG custom_login (usajobs): Storing job_data: {job_data_from_form[:100] if job_data_from_form else "None"}', 'debug')
-                
+
                 session['pending_save_job'] = pending_data
                 session.modified = True
-            
+
             next_destination_endpoint = request.url_rule.endpoint if request.url_rule else url_for('home')
-            flash(f'DEBUG custom_login: Intending to redirect to login with next={next_destination_endpoint}', 'debug')
+
             flash('You need to be logged in to save jobs.', 'info')
             return redirect(url_for('login', next=next_destination_endpoint))
         return f(*args, **kwargs)
     return decorated_function
 
-# Adzuna credentials
-ADZUNA_APP_ID  = "07a9048c"
-ADZUNA_APP_KEY = "1b7efef5faefcc8872d8c643702eb631"
-ADZUNA_COUNTRY = "us"
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
@@ -91,10 +119,10 @@ def home():
 
     if search_performed:
         batch_page = 1
-        url = f"https://api.adzuna.com/v1/api/jobs/{ADZUNA_COUNTRY}/search/{batch_page}"
+        url = f"https://api.adzuna.com/v1/api/jobs/{os.getenv('ADZUNA_COUNTRY')}/search/{batch_page}"
         params = {
-            "app_id": ADZUNA_APP_ID,
-            "app_key": ADZUNA_APP_KEY,
+            "app_id": ADZUNA_ID,
+            "app_key": ADZUNA_KEY,
             "what": keyword,
             "where": location,
             "results_per_page": 30,
@@ -173,14 +201,111 @@ def login():
             flash("Login Unsuccessful. Please check your email and password", 'danger')
     return render_template('login.html', title='Login', form=form)
 
+
+
+@app.route("/google")
+def google_login():
+    if not google.authorized:
+        flash("Google login failed. Please try again.", "danger")
+        return redirect(url_for("google.login"))
+    try:
+        resp = google.get("/oauth2/v2/userinfo")
+        if not resp.ok:
+            flash("Failed to fetch user info from Google", "danger")
+            return redirect(url_for("login"))
+
+        user_info = resp.json()
+        # Extract user information from the response
+        email = user_info["email"]
+        username= user_info.get('name') or email.split('@')[0]  # Use the part before '@' as username
+
+        if not email:
+            flash("No email found in Google account", "danger")
+            return redirect(url_for("login"))
+
+        # Check if user exists or create one
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            user = User(username=username, email=email, password='oauth')  # Dummy password
+            db.session.add(user)
+            db.session.commit()
+        login_user(user)
+        flash("Logged in via Google", "success")
+        return redirect(url_for("home"))
+
+    except Exception as e:
+        import traceback
+        print('Google login error:', e)
+        traceback.print_exc()
+        flash("Something went wrong during Google login", "danger")
+        return redirect(url_for("login"))
+
+
+@app.route("/github")
+def github_login():
+    if not github.authorized:
+        return redirect(url_for("github.login"))
+
+    resp = github.get("/user")
+    if not resp.ok:
+        flash("GitHub login failed", "danger")
+        return redirect(url_for("login"))
+
+    user_info = resp.json()
+    github_email = user_info.get("email")
+    github_username = user_info.get("login")
+
+    # If GitHub didn't return an email, fetch it from the API
+    if not github_email:
+        emails_resp = github.get("/user/emails")
+        if emails_resp.ok:
+            for email_obj in emails_resp.json():
+                if email_obj.get("primary") and email_obj.get("verified"):
+                    github_email = email_obj.get("email")
+                    break
+
+    if not github_email:
+        flash("GitHub login did not return an email address", "danger")
+        return redirect(url_for("login"))
+
+    # Check if user already exists
+    user = User.query.filter_by(email=github_email).first()
+    if not user:
+        # Create new user
+
+        user = User(username=github_username, email=github_email, password="oauth")  # Dummy password
+        db.session.add(user)
+        db.session.commit()
+
+    login_user(user)
+    flash("Logged in via GitHub", "success")
+    return redirect(url_for("home"))
+
+
 @app.route('/logout')
 def logout():
+    # 1) Log out from your app
     logout_user()
-    # Clear any pending actions if user logs out
-    session.pop('pending_save_job', None)
-    session.modified = True
 
-    return redirect(url_for('home'))
+    # 2) If there’s a Google OAuth token, revoke it
+    google_token = session.get("google_oauth_token", {}).get("access_token")
+    if google_token:
+        requests.post(
+            "https://oauth2.googleapis.com/revoke",
+            params={"token": google_token},
+            headers={"content-type": "application/x-www-form-urlencoded"}
+        )
+    github_token = session.get("github_oauth_token", {}).get("access_token")
+    if github_token:
+        requests.delete("https://api.github.com/applications/Ov23liaSTZ9n66sMdPCS/token",
+            auth=("Ov23liaSTZ9n66sMdPCS", "7b052914a6fa3a30d4d6b114fd95cf3dca8ae893"),
+            json={"access_token": github_token})
+    # 3) Clear it from the session so Flask-Dance won’t reuse it
+    session.pop("google_oauth_token", None)
+    session.pop("github_oauth_token", None)
+
+    flash("You’ve been logged out.", "info")
+    return redirect(url_for('login'))
 
 @app.route('/account', methods=['GET', 'POST'])
 @login_required
@@ -360,3 +485,520 @@ def reset_token(token):
         flash(f'Your password has been updated! You are now able to log in.', 'success')
         return redirect(url_for('login'))
     return render_template('reset_token.html', title='Reset Password', form=form)
+
+
+#From Weilan
+@app.route('/resume/new', methods=['GET', 'POST'])
+@login_required
+def new_resume():
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            flash('No file part', 'danger')
+            return redirect(request.url)
+        file = request.files['file']
+        if file.filename == '':
+            flash('No selected file', 'danger')
+            return redirect(request.url)
+        if file:
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+
+            # Extract text from PDF
+            text = extract_text(file_path)
+
+            # Get AI suggestions
+            suggestions = get_ai_suggestions(text)
+
+            # Format data according to JSON Resume schema
+            resume_data = format_resume_data(suggestions)
+
+            # Save to database
+            resume = Resume(
+                title=filename,
+                content=json.dumps(resume_data),
+                user_id=current_user.id
+            )
+            db.session.add(resume)
+            db.session.commit()
+
+            # Clean up
+            os.remove(file_path)
+
+            flash('Your resume has been uploaded and processed!', 'success')
+            return redirect(url_for('resume_preview', resume_id=resume.id))
+    return render_template('upload.html', title='New Resume')
+
+
+@app.route('/resume/<int:resume_id>/preview')
+@login_required
+def resume_preview(resume_id):
+    resume = Resume.query.get_or_404(resume_id)
+    if resume.user_id != current_user.id:
+        return render_template('error.html',
+                               title='Access Denied',
+                               message='You do not have permission to view this resume.')
+
+    resume_data = json.loads(resume.content)
+    response = render_template('resume_preview.html', resume=resume_data)
+    return response, 200, {'X-Frame-Options': 'DENY'}
+
+
+@app.route('/resume/<int:resume_id>/download')
+@login_required
+def download_resume(resume_id):
+    resume = Resume.query.get_or_404(resume_id)
+    if resume.user_id != current_user.id:
+        return render_template('error.html',
+                               title='Access Denied',
+                               message='You do not have permission to download this resume.')
+
+    resume_data = json.loads(resume.content)
+
+    # Create a temporary HTML file
+    with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as temp_html:
+        html_content = render_template('resume_preview.html', resume=resume_data)
+        temp_html.write(html_content.encode('utf-8'))
+        temp_html_path = temp_html.name
+
+    # Convert HTML to PDF
+    pdf_path = temp_html_path.replace('.html', '.pdf')
+    try:
+        pdfkit.from_file(temp_html_path, pdf_path)
+    except Exception as e:
+        os.unlink(temp_html_path)
+        return render_template('error.html',
+                               title='PDF Generation Error',
+                               message='Failed to generate PDF',
+                               error_details=str(e))
+
+    # Clean up the temporary HTML file
+    os.unlink(temp_html_path)
+
+    # Send the PDF file
+    try:
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name=f"{resume.title.rsplit('.', 1)[0]}.pdf",
+            mimetype='application/pdf'
+        )
+    finally:
+        # Clean up the temporary PDF file
+        os.unlink(pdf_path)
+
+
+@app.route('/resume/<int:resume_id>/delete', methods=['POST'])
+@login_required
+def delete_resume(resume_id):
+    resume = Resume.query.get_or_404(resume_id)
+    if resume.user_id != current_user.id:
+        return render_template('error.html',
+                               title='Access Denied',
+                               message='You do not have permission to delete this resume.')
+
+    db.session.delete(resume)
+    db.session.commit()
+    flash('Resume has been deleted!', 'success')
+    return redirect(url_for('home'))
+
+
+@app.route('/resume/<int:resume_id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_resume(resume_id):
+    resume = Resume.query.get_or_404(resume_id)
+    if resume.user_id != current_user.id:
+        return render_template('error.html',
+                               title='Access Denied',
+                               message='You do not have permission to edit this resume.')
+
+    if request.method == 'POST':
+        resume_data = request.json
+        resume.content = json.dumps(resume_data)
+        db.session.commit()
+        return jsonify({'message': 'Resume updated successfully'})
+
+    resume_data = json.loads(resume.content)
+    return render_template('edit_resume.html', resume=resume_data)
+
+
+@app.route('/resume', methods=['GET', 'POST'])
+def resume():
+    if request.method == 'POST':
+        if 'file' in request.files:
+            file = request.files['file']
+            if file.filename:
+                text = ''
+                if file.filename.endswith('.pdf'):
+                    with pdfplumber.open(file) as pdf:
+                        for page in pdf.pages:
+                            page_text = page.extract_text()
+                            if page_text:
+                                text += page_text + '\n'
+                elif file.filename.endswith('.docx'):
+                    doc = docx.Document(file)
+                    for para in doc.paragraphs:
+                        text += para.text + '\n'
+                parsed = {
+                    "summary": text[:300],
+                    "skills": [],
+                    "education": [],
+                    "workExperience": []
+                }
+                return jsonify(parsed)
+        return redirect(url_for('resume_builder'))
+    return render_template('resume.html')
+
+
+@app.route('/resume/builder')
+def resume_builder():
+    return render_template('resume_builder.html', title='Resume Builder')
+
+
+@app.route('/resume/analyze', methods=['POST'])
+def analyze_resume():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        # Convert resume data to text for analysis
+        resume_text = f"""
+Name: {data.get('name', '')}
+Email: {data.get('email', '')}
+Phone: {data.get('phone', '')}
+Location: {data.get('location', '')}
+
+Summary:
+{data.get('summary', '')}
+
+Experience:
+{chr(10).join([f"- {exp.get('title', '')} at {exp.get('company', '')} ({exp.get('start', '')} - {exp.get('end', '')}): {exp.get('description', '')}" for exp in data.get('experience', [])])}
+
+Education:
+{chr(10).join([f"- {edu.get('degree', '')} from {edu.get('school', '')} ({edu.get('start', '')} - {edu.get('end', '')})" for edu in data.get('education', [])])}
+
+Skills:
+{data.get('skills', '')}
+"""
+
+        # Get AI suggestions
+        suggestions = get_ai_suggestions(resume_text)
+
+        return jsonify({
+            'success': True,
+            'suggestions': suggestions
+        })
+
+    except Exception as e:
+        app.logger.error(f"Resume analysis error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/resume/export', methods=['POST'])
+def export_resume():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        # Format the resume data
+        formatted_data = format_resume_data(data)
+        theme = data.get('theme', 'modern')
+
+        # Convert resume data to HTML using the selected theme
+        template = Template(load_template(theme))
+        html_content = template.render(resume=formatted_data)
+
+        # Create temporary files
+        with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as temp_html:
+            temp_html.write(html_content.encode('utf-8'))
+            temp_html_path = temp_html.name
+
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
+            temp_pdf_path = temp_pdf.name
+
+        try:
+            # Configure pdfkit options
+            options = {
+                'page-size': 'Letter',
+                'margin-top': '0.75in',
+                'margin-right': '0.75in',
+                'margin-bottom': '0.75in',
+                'margin-left': '0.75in',
+                'encoding': 'UTF-8',
+                'no-outline': None,
+                'enable-local-file-access': None
+            }
+
+            # Convert HTML to PDF
+            pdfkit.from_file(temp_html_path, temp_pdf_path, options=options)
+
+            # Send the PDF file
+            return send_file(
+                temp_pdf_path,
+                as_attachment=True,
+                download_name='resume.pdf',
+                mimetype='application/pdf'
+            )
+        finally:
+            # Clean up temporary files
+            try:
+                os.unlink(temp_html_path)
+                os.unlink(temp_pdf_path)
+            except Exception as e:
+                app.logger.error(f"Error cleaning up temporary files: {str(e)}")
+
+    except Exception as e:
+        app.logger.error(f"Export error: {str(e)}")
+        return jsonify({'error': f'Failed to export resume: {str(e)}'}), 500
+
+
+
+@app.route('/resume/preview', methods=['POST'])
+def preview_resume():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        # Format the resume data with error handling
+        formatted_data = format_resume_data(data)
+        theme = data.get('theme', 'modern')
+
+        try:
+            # Convert resume data to HTML using the selected theme
+            template = Template(load_template(theme))
+            html_content = template.render(resume=formatted_data)
+        except Exception as e:
+            app.logger.error(f"Template rendering error: {str(e)}")
+            # Fallback to a basic template if theme rendering fails
+            html_content = f"""
+            <div class="resume">
+                <div class="header">
+                    <h1>{formatted_data['basics']['name']}</h1>
+                    <div class="contact-info">
+                        <span>{formatted_data['basics']['email']}</span>
+                        <span class="separator">•</span>
+                        <span>{formatted_data['basics']['phone']}</span>
+                        <span class="separator">•</span>
+                        <span>{formatted_data['basics']['location']['address']}</span>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>Summary</h2>
+                    <p>{formatted_data['basics']['summary']}</p>
+                </div>
+
+                <div class="section">
+                    <h2>Experience</h2>
+                    {''.join([f'''
+                    <div class="entry">
+                        <div class="entry-header">
+                            <h3>{work["position"]}</h3>
+                            <span class="company">{work["company"]}</span>
+                        </div>
+                        <div class="entry-dates">{work["startDate"]} - {work["endDate"]}</div>
+                        <p class="description">{work["summary"]}</p>
+                    </div>''' for work in formatted_data['work']])}
+                </div>
+
+                <div class="section">
+                    <h2>Education</h2>
+                    {''.join([f'''
+                    <div class="entry">
+                        <div class="entry-header">
+                            <h3>{edu["institution"]}</h3>
+                            <span class="degree">{edu["area"]}</span>
+                        </div>
+                        <div class="entry-dates">{edu["startDate"]} - {edu["endDate"]}</div>
+                    </div>''' for edu in formatted_data['education']])}
+                </div>
+
+                <div class="section">
+                    <h2>Skills</h2>
+                    <div class="skills-list">
+                        {''.join([f'<span class="skill-tag">{skill["name"]}</span>' for skill in formatted_data['skills']])}
+                    </div>
+                </div>
+            </div>
+            """
+
+        # Add CSS for better web preview
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{formatted_data['basics']['name']} - Resume</title>
+            <style>
+                @page {{
+                    size: letter;
+                    margin: 0;
+                }}
+                body {{
+                    font-family: "Times New Roman", Times, serif;
+                    line-height: 1.15;
+                    margin: 0;
+                    padding: 0;
+                    background-color: #f8f9fa;
+                    color: #000;
+                }}
+                .resume {{
+                    width: 8.5in;
+                    min-height: 11in;
+                    padding: 0.75in;
+                    margin: 0 auto;
+                    background-color: white;
+                    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+                    position: relative;
+                }}
+                .header {{
+                    text-align: center;
+                    margin-bottom: 0.25in;
+                }}
+                h1 {{
+                    font-size: 12pt;
+                    margin: 0 0 0.1in 0;
+                    font-weight: bold;
+                    text-transform: uppercase;
+                }}
+                .contact-info {{
+                    font-size: 12pt;
+                }}
+                .separator {{
+                    margin: 0 0.1in;
+                }}
+                h2 {{
+                    font-size: 12pt;
+                    font-weight: bold;
+                    text-transform: uppercase;
+                    border-bottom: 1px solid #000;
+                    padding-bottom: 0.05in;
+                    margin: 0.2in 0 0.1in 0;
+                }}
+                .section {{
+                    margin-bottom: 0.15in;
+                }}
+                .entry {{
+                    margin-bottom: 0.1in;
+                }}
+                .entry-header {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: baseline;
+                    margin-bottom: 0.02in;
+                }}
+                .entry-header h3 {{
+                    font-size: 12pt;
+                    font-weight: bold;
+                    margin: 0;
+                }}
+                .company, .degree {{
+                    font-size: 12pt;
+                    font-style: italic;
+                }}
+                .entry-dates {{
+                    font-size: 12pt;
+                    margin-bottom: 0.02in;
+                }}
+                .description {{
+                    font-size: 12pt;
+                    margin: 0.02in 0;
+                    text-align: justify;
+                }}
+                .skills-list {{
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.1in;
+                    margin-top: 0.05in;
+                }}
+                .skill-tag {{
+                    font-size: 12pt;
+                    padding: 0;
+                    margin-right: 0.2in;
+                }}
+                .skill-tag:after {{
+                    content: ",";
+                }}
+                .skill-tag:last-child:after {{
+                    content: "";
+                }}
+                p {{
+                    margin: 0.02in 0;
+                    font-size: 12pt;
+                    text-align: justify;
+                }}
+                @media print {{
+                    body {{
+                        background-color: white;
+                    }}
+                    .resume {{
+                        box-shadow: none;
+                        width: 100%;
+                        height: 100%;
+                        margin: 0;
+                        padding: 0.75in;
+                    }}
+                }}
+            </style>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
+
+        return html_content, 200, {'Content-Type': 'text/html'}
+
+    except Exception as e:
+        app.logger.error(f"Preview error: {str(e)}")
+        # Return a basic error page instead of JSON error
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Resume Preview Error</title>
+            <style>
+                body {{
+                    font-family: "Times New Roman", Times, serif;
+                    line-height: 1.15;
+                    margin: 0;
+                    padding: 20px;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    background-color: #f8f9fa;
+                }}
+                .error-container {{
+                    background-color: white;
+                    padding: 30px;
+                    border: 1px solid #000;
+                    text-align: center;
+                }}
+                h1 {{ 
+                    color: #000;
+                    font-size: 12pt;
+                    margin: 0 0 12px 0;
+                    font-weight: bold;
+                }}
+                p {{
+                    margin: 8px 0;
+                    font-size: 12pt;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="error-container">
+                <h1>Error Generating Preview</h1>
+                <p>There was an error generating the resume preview. Please try again or contact support if the problem persists.</p>
+                <p>Error details: {str(e)}</p>
+            </div>
+        </body>
+        </html>
+        """
+        return error_html, 200, {'Content-Type': 'text/html'}
