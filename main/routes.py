@@ -1,9 +1,7 @@
 import os
-import json
 from flask import render_template, url_for, flash, redirect, request, abort, session, jsonify, send_file
-from wtforms.validators import email
 
-from main import app, db, bcrypt, mail, google_bp, google, github_bp, github
+from main import app, db, bcrypt, mail, google, github
 from main.models import User, SavedJob, Resume
 from main.forms import RegistrationForm, LoginForm, UpdateAccountForm, RequestRestForm, ResetPasswordForm
 from flask_login import login_user, current_user, logout_user, login_required
@@ -13,7 +11,6 @@ from functools import wraps
 import ast
 from datetime import datetime
 import docx
-
 
 import tempfile
 import pdfkit
@@ -26,8 +23,6 @@ from main.utils.template_loader import load_template
 from werkzeug.utils import secure_filename
 
 
-
-import cohere
 from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
@@ -287,7 +282,7 @@ def logout():
     # 1) Log out from your app
     logout_user()
 
-    # 2) If there’s a Google OAuth token, revoke it
+    # 2) If there's a Google OAuth token, revoke it
     google_token = session.get("google_oauth_token", {}).get("access_token")
     if google_token:
         requests.post(
@@ -298,13 +293,13 @@ def logout():
     github_token = session.get("github_oauth_token", {}).get("access_token")
     if github_token:
         requests.delete("https://api.github.com/applications/Ov23liaSTZ9n66sMdPCS/token",
-            auth=("Ov23liaSTZ9n66sMdPCS", "7b052914a6fa3a30d4d6b114fd95cf3dca8ae893"),
+            auth=(os.getenv("GITHUB_CLIENT_ID"), os.getenv("GITHUB_CLIENT_SECRET")),
             json={"access_token": github_token})
-    # 3) Clear it from the session so Flask-Dance won’t reuse it
+    # 3) Clear it from the session so Flask-Dance won't reuse it
     session.pop("google_oauth_token", None)
     session.pop("github_oauth_token", None)
 
-    flash("You’ve been logged out.", "info")
+    flash("You've been logged out.", "info")
     return redirect(url_for('login'))
 
 @app.route('/account', methods=['GET', 'POST'])

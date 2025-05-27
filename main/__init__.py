@@ -10,6 +10,11 @@ from flask_dance.contrib.github import make_github_blueprint, github
 
 
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
 
 
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize Cohere client
-co = cohere.Client(os.getenv("Cohere_API"))
+co = cohere.Client(os.getenv("COHERE_API_KEY"))
 
 def extract_text(file_path):
     """Extract text from PDF or DOCX files"""
