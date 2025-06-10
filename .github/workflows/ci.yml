@@ -48,7 +48,7 @@ jobs:
     - name: Deploy to EC2
       run: |
         ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-          cd /home/ec2-user/your-project-folder
+          cd /home/ubuntu/careerfinder
           git pull origin main
           docker-compose pull
           docker-compose up --build -d
